@@ -13,6 +13,10 @@
 #include "utils/system.h"
 #include "utils/timer.h"
 
+#include "pr2/pr2.h"
+#include "pr2/policy.h"
+#include "pr2/deadend.h"
+
 #include <cassert>
 #include <iostream>
 #include <limits>
@@ -23,20 +27,26 @@ using utils::ExitCode;
 
 static successor_generator::SuccessorGenerator &get_successor_generator(
     const TaskProxy &task_proxy, utils::LogProxy &log) {
-    log << "Building successor generator..." << flush;
-    int peak_memory_before = utils::get_peak_memory_in_kb();
-    utils::Timer successor_generator_timer;
-    successor_generator::SuccessorGenerator &successor_generator =
-        successor_generator::g_successor_generators[task_proxy];
-    successor_generator_timer.stop();
-    log << "done!" << endl;
-    int peak_memory_after = utils::get_peak_memory_in_kb();
-    int memory_diff = peak_memory_after - peak_memory_before;
-    log << "peak memory difference for successor generator creation: "
-        << memory_diff << " KB" << endl
-        << "time for successor generation creation: "
-        << successor_generator_timer << endl;
-    return successor_generator;
+        if (!PR2.general.successor_generator_defined) {
+            log << "Building successor generator..." << flush;
+            int peak_memory_before = utils::get_peak_memory_in_kb();
+            utils::Timer successor_generator_timer;
+            successor_generator::SuccessorGenerator &successor_generator =
+                successor_generator::g_successor_generators[task_proxy];
+            successor_generator_timer.stop();
+            log << "done!" << endl;
+            int peak_memory_after = utils::get_peak_memory_in_kb();
+            int memory_diff = peak_memory_after - peak_memory_before;
+            log << "peak memory difference for successor generator creation: "
+                << memory_diff << " KB" << endl
+                << "time for successor generation creation: "
+                << successor_generator_timer << endl;
+            PR2.general.successor_generator_defined = true;
+            PR2.general.successor_generator = &successor_generator;
+            return successor_generator;
+        } else {
+            return *PR2.general.successor_generator;
+        }
 }
 
 SearchAlgorithm::SearchAlgorithm(
@@ -143,6 +153,13 @@ void SearchAlgorithm::set_plan(const Plan &p) {
 }
 
 void SearchAlgorithm::search() {
+
+    if (PR2.deadend.record_online) {
+        PR2.deadend.found_online.clear();
+        delete PR2.deadend.online_policy;
+        PR2.deadend.online_policy = new Policy<PolicyItem>();
+    }
+
     initialize();
     utils::CountdownTimer timer(max_time);
     while (status == IN_PROGRESS) {
@@ -153,13 +170,22 @@ void SearchAlgorithm::search() {
             break;
         }
     }
-    // TODO: Revise when and which search times are logged.
-    log << "Actual search time: " << timer.get_elapsed_time() << endl;
+
+    if (PR2.deadend.record_online &&
+            !PR2.weaksearch.limit_states &&
+            PR2.deadend.found_online.size() > 0)
+                update_deadends(PR2.deadend.found_online);
+
+    if (PR2.logging.verbose)
+        log << "Actual search time: " << timer.get_elapsed_time() << endl;
 }
 
+// PR2: Modified to allow for specific task
 bool SearchAlgorithm::check_goal_and_set_plan(const State &state) {
-    if (task_properties::is_goal_state(task_proxy, state)) {
-        log << "Solution found!" << endl;
+
+    if (PR2.pr2_goal_check(task_proxy, state)) {
+        if (PR2.logging.verbose)
+            cout << "Solution found!" << endl;
         Plan plan;
         search_space.trace_path(state, plan);
         set_plan(plan);

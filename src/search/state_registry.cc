@@ -61,15 +61,8 @@ const State &StateRegistry::get_initial_state() {
         }
         state_data_pool.push_back(buffer.get());
         StateID id = insert_id_or_pop_state();
-        cached_initial_state = utils::make_unique_ptr<State>(lookup_state(id));
+        cached_initial_state = make_unique<State>(lookup_state(id));
     }
-    int x = 1 + 1;
-    x = 1 + 1;
-    x = 1 + 1;
-    x = 1 + 1;
-    x = 1 + 1;
-    x = 1 + 1;
-    x = 1 + 1;
     // I think this return is broken
     return *cached_initial_state;
 }

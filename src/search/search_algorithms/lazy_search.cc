@@ -84,7 +84,15 @@ LazySearch::LazySearch(
 
 
 void LazySearch::initialize() {
-    log << "Conducting lazy best first search, (real) bound = " << bound << endl;
+    if (PR2.logging.verbose)
+        log << "Conducting lazy best first search, (real) bound = " << bound << endl;
+
+    // Only set up the heuristics on the first go
+    if (was_initialized)
+        return;
+    else
+        was_initialized = true;
+
 
     assert(open_list);
     set<Evaluator *> evals;
@@ -168,7 +176,8 @@ void LazySearch::generate_successors() {
 
 SearchStatus LazySearch::fetch_next_state() {
     if (open_list->empty()) {
-        log << "Completely explored state space -- no solution!" << endl;
+        if (PR2.logging.verbose)
+            log << "Completely explored state space -- no solution!" << endl;
         return FAILED;
     }
 
@@ -201,17 +210,36 @@ SearchStatus LazySearch::fetch_next_state() {
 SearchStatus LazySearch::step() {
     // Invariants:
     // - current_state is the next state for which we want to compute the heuristic.
-    // - current_predecessor is a permanent pointer to the predecessor of that state.
-    // - current_operator is the operator which leads to current_state from predecessor.
+    // - current_predecessor_id is the state ID of the predecessor of that state.
+    // - current_operator_id is the ID of the operator which leads to current_state from predecessor.
     // - current_g is the g value of the current state according to the cost_type
     // - current_real_g is the g value of the current state (using real costs)
 
 
     SearchNode node = search_space.get_node(current_state);
+    // node.get_state().unpack();
+    // cout << node.get_state().get_unpacked_values() << endl;
+    // if (current_predecessor_id != StateID::no_state) {
+    //     State predd = state_registry.lookup_state(current_predecessor_id);
+    //     predd.unpack();
+    //     cout << predd.get_unpacked_values() << endl;
+    //     cout << "\nOperator: " << task.get()->get_operator_name(current_operator_id.get_index(), false) << endl;
+    //     current_eval_context.get_state().unpack();
+    //     cout << current_eval_context.get_state().get_unpacked_values() << endl;
+    // }
+
     bool reopen = reopen_closed_nodes && !node.is_new() &&
         !node.is_dead_end() && (current_g < node.get_g());
 
     if (node.is_new() || reopen) {
+
+        if (PR2.weaksearch.limit_states) {
+            if (state_count > PR2.weaksearch.max_states)
+                return FAILED;
+            else
+                state_count++;
+        }
+
         if (current_operator_id != OperatorID::no_operator) {
             assert(current_predecessor_id != StateID::no_state);
             if (!path_dependent_evaluators.empty()) {
@@ -223,7 +251,6 @@ SearchStatus LazySearch::step() {
         }
         statistics.inc_evaluated_states();
         if (!open_list->is_dead_end(current_eval_context)) {
-            // TODO: Generalize code for using multiple evaluators.
             if (current_predecessor_id == StateID::no_state) {
                 node.open_initial();
                 if (search_progress.check_progress(current_eval_context))
